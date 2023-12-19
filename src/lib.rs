@@ -25,7 +25,7 @@ pub fn fix_vars(vars: &[&str]) -> std::result::Result<(), Error> {
     #[allow(clippy::needless_return)]
     return Ok(());
   }
-  #[cfg(not(windows))]
+  #[cfg(not(target_os = "windows"))]
   {
     let default_shell = if cfg!(target_os = "macos") {
       "/bin/zsh"
@@ -33,14 +33,29 @@ pub fn fix_vars(vars: &[&str]) -> std::result::Result<(), Error> {
       "/bin/sh"
     };
     let shell = std::env::var("SHELL").unwrap_or_else(|_| default_shell.into());
+    let shell_cmd = shell.split("/").last().unwrap_or_default();
 
-    let out = std::process::Command::new(shell)
-      .arg("-ilc")
-      .arg("echo -n \"_SHELL_ENV_DELIMITER_\"; env; echo -n \"_SHELL_ENV_DELIMITER_\"; exit")
-      // Disables Oh My Zsh auto-update thing that can block the process.
-      .env("DISABLE_AUTO_UPDATE", "true")
-      .output()
-      .map_err(Error::Shell)?;
+    let out = match shell_cmd {
+      "nu" => {
+        let cmd = std::process::Command::new(shell)
+          .arg("-c")
+          // Just escape to the system echo and env commands
+          // https://www.nushell.sh/book/escaping.html
+          .arg("echo \"_SHELL_ENV_DELIMITER_\"; ^env; echo \"_SHELL_ENV_DELIMITER_\"")
+          .output()
+          .map_err(Error::Shell)?;
+        cmd
+      }
+      _ => {
+        std::process::Command::new(shell)
+          .arg("-ilc")
+          .arg("echo -n \"_SHELL_ENV_DELIMITER_\"; env; echo -n \"_SHELL_ENV_DELIMITER_\"; exit")
+          // Disables Oh My Zsh auto-update thing that can block the process.
+          .env("DISABLE_AUTO_UPDATE", "true")
+          .output()
+          .map_err(Error::Shell)?
+      }
+    };
 
     if out.status.success() {
       let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
